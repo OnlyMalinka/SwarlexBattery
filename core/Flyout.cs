@@ -3,6 +3,7 @@
 // Windows 11 draws its rounded corners, border and shadow (Win.FlyoutFrame). A transparent window with a
 // hand-drawn frame used to get a second, system-drawn box around it now and then.
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -37,6 +38,7 @@ namespace SwarlexBattery
         string actionsFor, renaming;              // the panel: a device's options shown, its name being edited
         string graphFor; bool graphWeek;          // the panel: a device's battery history shown (a click), over 24 h or 7 days
         long graphHover;                          // the time under the pointer in the graph (0: none); kept when the panel redraws
+        string reveal;                            // what a click just opened ("graph:id", "actions:id", "hidden"): drawn with a fade once
 
         static Brush MakeBrush(string c) { var b = (Brush)new BrushConverter().ConvertFromString(c); b.Freeze(); return b; }
 
@@ -137,7 +139,7 @@ namespace SwarlexBattery
             if (Open != null) { lastClosed = Open; lastClosedAt = DateTime.Now; }
             Open = null; win.Hide();
             CloseSide();
-            renaming = null; graphHover = 0;
+            renaming = null; graphHover = 0; reveal = null; parts.Clear(); closing = null;   // a fade still running ends without effect
             TrimSoon();
         }
 
@@ -248,6 +250,40 @@ namespace SwarlexBattery
                 var el = w.Content as UIElement;
                 if (el != null) el.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.15, 1, dur));
             }
+        }
+
+        // Something a click opened inside the panel or the menu (the history, a device's options, the hidden devices)
+        // fades in and slides down a little, once: the redraws that follow show it as it is. Closing it again
+        // (Collapse) fades it out and slides it up before it is taken away.
+        readonly Dictionary<string, UIElement> parts = new Dictionary<string, UIElement>();   // the drawn part for each key
+        string closing;                           // the key whose part is fading out
+
+        UIElement Reveal(UIElement el, string what)
+        {
+            parts[what] = el;
+            if (closing == what) { el.Opacity = 0; return el; }   // redrawn by a refresh while it fades out: no flash
+            if (reveal != what) return el;
+            reveal = null;
+            if (!Config.Bool("openAnimation", true)) return el;
+            var tt = new TranslateTransform(0, -10); el.RenderTransform = tt;
+            var dur = TimeSpan.FromMilliseconds(260); var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            el.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, dur) { EasingFunction = ease });
+            tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-10, 0, dur) { EasingFunction = ease });
+            return el;
+        }
+
+        void Collapse(string what, Action done)
+        {
+            if (closing == what) return;   // a second click while it fades out
+            UIElement el;
+            if (!Config.Bool("openAnimation", true) || !parts.TryGetValue(what, out el) || !el.IsVisible) { done(); return; }
+            closing = what;
+            var tt = new TranslateTransform(0, 0); el.RenderTransform = tt;
+            var dur = TimeSpan.FromMilliseconds(190); var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+            var fade = new DoubleAnimation(el.Opacity, 0, dur) { EasingFunction = ease };
+            fade.Completed += (s, e) => { if (closing != what) return; closing = null; done(); };
+            el.BeginAnimation(UIElement.OpacityProperty, fade);
+            tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, -10, dur) { EasingFunction = ease });
         }
 
         // "Opening animation" (Preferences, on by default): the window's content fades in and slides into place
@@ -489,17 +525,41 @@ namespace SwarlexBattery
                                                             Foreground = string.IsNullOrEmpty(it.State) ? fg : StateBrush(it.State), Background = track, BorderThickness = new Thickness(0) });
                     if (it.Id != null)
                     {
-                        box.MouseRightButtonUp += (s, e) => { actionsFor = actionsFor == item.Id ? null : item.Id; CloseSide(); renaming = null; RenderPanel(true); e.Handled = true; };
-                        box.MouseLeftButtonUp += (s, e) => { if (renaming != null) return; graphFor = graphFor == item.Id ? null : item.Id; RenderPanel(true); e.Handled = true; };
+                        box.MouseRightButtonUp += (s, e) =>
+                        {
+                            e.Handled = true; CloseSide();
+                            if (actionsFor == item.Id)
+                            {
+                                renaming = null;
+                                Collapse("actions:" + item.Id, () => { if (actionsFor == item.Id) { actionsFor = null; if (Open == "panel") RenderPanel(true); } });
+                                return;
+                            }
+                            actionsFor = item.Id; renaming = null; reveal = "actions:" + item.Id;
+                            RenderPanel(true);
+                        };
+                        box.MouseLeftButtonUp += (s, e) =>
+                        {
+                            if (renaming != null) return;
+                            e.Handled = true;
+                            if (graphFor == item.Id)
+                            {
+                                Collapse("graph:" + item.Id, () => { if (graphFor == item.Id) { graphFor = null; graphHover = 0; if (Open == "panel") RenderPanel(true); } });
+                                return;
+                            }
+                            graphFor = item.Id; graphHover = 0;   // a pointer time from another graph does not carry over
+                            reveal = "graph:" + item.Id;
+                            RenderPanel(true);
+                        };
                         box.Cursor = Cursors.Hand;
                     }
                     // the row lights up under the pointer like the menu's rows, so it reads as something to click
                     root.Children.Add(it.Id == null ? (UIElement)box : new Border { Child = box, Style = rowStyle, CornerRadius = new CornerRadius(6),
                                                                                     Margin = new Thickness(-6, 0, -6, 0), Padding = new Thickness(6, 0, 6, 0) });
-                    if (graphFor != null && graphFor == it.Id) root.Children.Add(Graph(it));
-                    if (actionsFor != null && actionsFor == it.Id) DeviceActions(root, it);
+                    if (graphFor != null && graphFor == it.Id) root.Children.Add(Reveal(Graph(it), "graph:" + it.Id));
+                    if (actionsFor != null && actionsFor == it.Id) { DeviceActions(root, it); Reveal(root.Children[root.Children.Count - 1], "actions:" + it.Id); }
                 }
-                if (snap.Items.Count > 0 && actionsFor == null)
+                // a device that went away while its options were open no longer hides the hint
+                if (snap.Items.Count > 0 && (actionsFor == null || !snap.Items.Any(x => x.Id == actionsFor)))
                 {
                     var hint = Text(Strings.T("deviceHint"), muted, 11); hint.Margin = new Thickness(0, 4, 0, 0); root.Children.Add(hint);
                 }
@@ -678,13 +738,21 @@ namespace SwarlexBattery
             var hidden = Config.Map("plugins.gadgets.hidden");
             if (hidden.Count > 0)
             {
-                root.Children.Add(MenuRow("ED1A", Strings.T("hiddenDevices", hidden.Count), () => { hiddenOpen = !hiddenOpen; Refresh(); }, false, null, false, hiddenOpen ? "E70E" : "E70D"));
+                root.Children.Add(MenuRow("ED1A", Strings.T("hiddenDevices", hidden.Count), () =>
+                {
+                    if (hiddenOpen) Collapse("hidden", () => { if (hiddenOpen) { hiddenOpen = false; Refresh(); } });
+                    else { hiddenOpen = true; reveal = "hidden"; Refresh(); }
+                }, false, null, false, hiddenOpen ? "E70E" : "E70D"));
                 if (hiddenOpen)
+                {
+                    var list = new StackPanel();
                     foreach (var kv in hidden.OrderBy(x => x.Value))
                     {
                         var id = kv.Key;
-                        root.Children.Add(MenuRow(null, Strings.T("showAgain", kv.Value), () => { host.Unhide(id); Refresh(); }, false, null, false, null, true));
+                        list.Children.Add(MenuRow(null, Strings.T("showAgain", kv.Value), () => { host.Unhide(id); Refresh(); }, false, null, false, null, true));
                     }
+                    root.Children.Add(Reveal(list, "hidden"));
+                }
             }
             if (Config.Str("update.repo", "") != "")
             {
