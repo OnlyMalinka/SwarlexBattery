@@ -2,6 +2,13 @@
 
 All notable changes. Downloads: [Releases](https://github.com/swarlex/SwarlexBattery/releases).
 
+## 2.0.9
+### Fixed
+- The open and close animations of the battery history, a device's options and the hidden devices are in step: the
+  window took its new height at once while the part faded, so the rows around it jumped. Now those rows glide to
+  their new place in the same time and with the same easing as the fade, opening and closing alike, and a refresh
+  that comes in the middle waits for the animation to finish.
+
 ## 2.0.8
 ### Changed
 - The battery history, a device's options (right-click) and the menu's hidden devices now slide open and closed with
