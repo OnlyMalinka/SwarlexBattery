@@ -721,7 +721,12 @@ namespace SwarlexBattery
                     {
                         Thread.Sleep(30);
                         var x = GetFeature(h, 0x05, c.FeatLen);
-                        if (x != null && x[0] == 0x05 && x[1] == 0 && x[2] == 0 && x[3] > 0) r.Level = Math.Min((int)x[3], 100);
+                        if (x != null && x[0] == 0x05 && x[1] == 0 && x[2] == 0 && x[3] > 0)
+                        {
+                            r.Level = Math.Min((int)x[3], 100);
+                            // AJAZZ AJ159 APEX: [10] is 01 while on its cable / dock (00 off it), seen with [11] = 20
+                            r.Charging = x.Length > 10 && x[10] == 0x01;
+                        }
                     }
                 }
             }
@@ -767,7 +772,8 @@ namespace SwarlexBattery
         static void ReadFlEsports(List<HidInfo> devs, List<Reading> outp)
         {
             var c = devs.FirstOrDefault(d => d.UsagePage == 0xFF1C && d.Usage == 0x0092 && d.OutLen >= 8); if (c == null) return;
-            string name = c.Pid == 0x50E4 ? "FL Esports GP108" : Clean(c.Product);
+            // 50E4 = on its cable, 50E5 = its 2.4G receiver (which answers 1A with a late "04 00 00 ff": no level there yet)
+            string name = c.Pid == 0x50E4 || c.Pid == 0x50E5 ? "FL Esports GP108" : Clean(c.Product);
             var r = new Reading { Id = "flesports-" + c.Pid.ToString("X4"), Name = name, Kind = "keyboard", Source = "flesports" };
             using (var h = Open(c.Path))
             {
