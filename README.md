@@ -89,7 +89,7 @@ and keeps your settings; uninstall from **Settings > Apps**.
 | **WLmouse / LAMZU / G-Wolves** | Beast X (Max / Mini Pro), Maya X; G-Wolves on the shared 8K receiver (HTS Plus, Lycan, HTXU, Fenrir, HTX Mini, WARG) and the models with a receiver of their own (HSK Pro / Plus / Lite / ACE, HTS, HTX, HTR, HT-S2, Fenrir, VUK, HTM Plus) |
 | **MCHOSE / AM Infinity / AJAZZ** | M7 / L7 / A7 family, G7; AM Infinity 8K; AJAZZ mice on the 2.4G 8K receiver (AJ159 APEX) |
 | **Audeze / JBL** | Maxwell (and Maxwell 2), Quantum 910 Wireless |
-| **Keyboards** | AULA F75 (2.4 GHz), Keychron (Ultra-Link 8K, M5 mouse), Lofree Hyzen; Razer and Logitech wireless keyboards |
+| **Keyboards** | AULA F75 (2.4 GHz), Keychron (Ultra-Link 8K, M5 mouse), Lofree Hyzen, FL Esports GP108 (USB); Razer and Logitech wireless keyboards |
 | **Darmoshark** | M3 4K on the 4K receiver; M3, M3S, N3 |
 | **Controllers** | PS5 DualSense / Edge, PS4 DualShock 4, Xbox (USB, wireless adapter, Bluetooth), Switch Pro / Joy-Con, 8BitDo, and other pads in Xbox (XInput) mode |
 | **Apple** | AirPods, AirPods Pro, AirPods Max and Beats on Bluetooth (each earbud, in ear or in the case, and the case) |

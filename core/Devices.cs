@@ -27,7 +27,7 @@ namespace SwarlexBattery
         public static HidInfo[] LastList = new HidInfo[0];   // collections seen by the last scan (for the log)
         static int listChanges = -1; static DateTime listAt;
         static readonly int[] Vendors = { 0x1532, 0x373B, 0x3554, 0x3770, 0x046D, 0x1038, 0x03F0, 0x1B1C, 0x248A, 0x1915, 0x054C, 0x057E, 0x2DC8,
-            0x36A7, 0x373E, 0x33E4, 0x3434, 0x0B05, 0x5253, 0x3837, 0xA8A5, 0x3151, 0x388D, 0x0ECB, 0x3329 };
+            0x36A7, 0x373E, 0x33E4, 0x3434, 0x0B05, 0x5253, 0x3837, 0xA8A5, 0x3151, 0x388D, 0x0ECB, 0x3329, 0x320F };
         public static string[] Others = new string[0];       // unsupported vendors' vendor collections (for the log)
 
         // One pass over every supported device. Safe to call from several threads (serialised).
@@ -77,6 +77,7 @@ namespace SwarlexBattery
                             case 0x5253: case 0x3837: case 0xA8A5: ReadMchose(grp.Key, grp.ToList(), outp); break;
                             case 0x3151: ReadAmInfinity(grp.ToList(), outp); break;
                             case 0x388D: ReadLofree(grp.ToList(), outp); break;
+                            case 0x320F: ReadFlEsports(grp.ToList(), outp); break;
                             case 0x0ECB: ReadJbl(grp.ToList(), outp); break;
                             case 0x3329: ReadAudeze(grp.ToList(), outp); break;
                         }
@@ -739,17 +740,41 @@ namespace SwarlexBattery
             {
                 if (!h.IsInvalid)
                 {
-                    Func<byte, int> cmd = op =>
-                    {
-                        Func<byte[], bool> isAck = q => q.Length > 3 && q[0] == 0x04;
-                        if (Ask(h, new byte[] { 0x04, 0x00, 0x00, 0x01 }, c.OutLen, c.InLen, 1500, q => isAck(q) && q[3] == 0x01) == null) return -1;
-                        var a = Ask(h, new byte[] { 0x04, 0x00, 0x00, op }, c.OutLen, c.InLen, 1500, q => isAck(q) && q.Length > 8 && (q[3] == op || q[3] == 0) && q[5] == 0 && q[6] == 0);
-                        Ask(h, new byte[] { 0x04, 0x00, 0x00, 0x02 }, c.OutLen, c.InLen, 500, q => isAck(q) && q[3] == 0x02);
-                        return a == null ? -1 : a[8];
-                    };
-                    int online = cmd(0xAA);
-                    if (online > 0) { int lvl = cmd(0x1A); if (lvl >= 0 && lvl <= 100) r.Level = lvl; }
+                    var a = TelinkKbCmd(h, c, 0xAA);
+                    int online = a == null ? -1 : a[8];
+                    if (online > 0) { a = TelinkKbCmd(h, c, 0x1A); if (a != null && a[8] <= 100) r.Level = a[8]; }
                     else if (online == 0) Trace.Add("lofree: keyboard offline");
+                }
+            }
+            outp.Add(r);
+        }
+
+        // One transaction of the Telink keyboard web-driver protocol on FF1C:0092 report 0x04 (Lofree, FL Esports):
+        // start (00 00 01), command, end (00 00 02). Returns the command's answer (data from byte 7 after the id) or null.
+        static byte[] TelinkKbCmd(SafeFileHandle h, HidInfo c, byte op)
+        {
+            Func<byte[], bool> isAck = q => q.Length > 3 && q[0] == 0x04;
+            if (Ask(h, new byte[] { 0x04, 0x00, 0x00, 0x01 }, c.OutLen, c.InLen, 1500, q => isAck(q) && q[3] == 0x01) == null) return null;
+            var a = Ask(h, new byte[] { 0x04, 0x00, 0x00, op }, c.OutLen, c.InLen, 1500, q => isAck(q) && q.Length > 9 && (q[3] == op || q[3] == 0) && q[5] == 0 && q[6] == 0);
+            Ask(h, new byte[] { 0x04, 0x00, 0x00, 0x02 }, c.OutLen, c.InLen, 500, q => isAck(q) && q[3] == 0x02);
+            return a;
+        }
+
+        // ---------------------------------------------------------------- FL Esports keyboards (Telink, 320F)
+        // Same transactions as Lofree. Verified on GP108 over USB (320F:50E4): AA (online) answers 0 on the cable, yet
+        // 1A answers 64 02 = 100 %; the byte after the level is taken as the charge state (1 charging, 2 full) as on
+        // other Telink boards - only 02 on the cable at 100 % has been seen.
+        static void ReadFlEsports(List<HidInfo> devs, List<Reading> outp)
+        {
+            var c = devs.FirstOrDefault(d => d.UsagePage == 0xFF1C && d.Usage == 0x0092 && d.OutLen >= 8); if (c == null) return;
+            string name = c.Pid == 0x50E4 ? "FL Esports GP108" : Clean(c.Product);
+            var r = new Reading { Id = "flesports-" + c.Pid.ToString("X4"), Name = name, Kind = "keyboard", Source = "flesports" };
+            using (var h = Open(c.Path))
+            {
+                if (!h.IsInvalid)
+                {
+                    var a = TelinkKbCmd(h, c, 0x1A);
+                    if (a != null && a[8] <= 100 && (a[8] > 0 || a[9] != 0)) { r.Level = a[8]; r.Charging = a[9] == 1 || a[9] == 2; }
                 }
             }
             outp.Add(r);
