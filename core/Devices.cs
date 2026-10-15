@@ -765,22 +765,21 @@ namespace SwarlexBattery
             return a;
         }
 
-        // ---------------------------------------------------------------- FL Esports keyboards (Telink, 320F)
-        // Same transactions as Lofree. Verified on GP108 over USB (320F:50E4): AA (online) answers 0 on the cable, yet
-        // 1A answers 64 02 = 100 %; the byte after the level is taken as the charge state (1 charging, 2 full) as on
-        // other Telink boards - only 02 on the cable at 100 % has been seen.
+        // ---------------------------------------------------------------- FL Esports GP108 keyboard on its cable (320F:50E4)
+        // The Lofree transactions above (Lofree's web driver), tested on a GP108 over USB: AA (online) answers 0 on the
+        // cable, 1A answers 64 02 = 100 %. 320F is a shared Telink vendor id, so only this pid is asked. 50E4 is the
+        // keyboard on its cable, so it charges there. Its 2.4G receiver (50E5) answers 1A with a late "04 00 00 ff" and
+        // is not asked.
         static void ReadFlEsports(List<HidInfo> devs, List<Reading> outp)
         {
-            var c = devs.FirstOrDefault(d => d.UsagePage == 0xFF1C && d.Usage == 0x0092 && d.OutLen >= 8); if (c == null) return;
-            // 50E4 = on its cable, 50E5 = its 2.4G receiver (which answers 1A with a late "04 00 00 ff": no level there yet)
-            string name = c.Pid == 0x50E4 || c.Pid == 0x50E5 ? "FL Esports GP108" : Clean(c.Product);
-            var r = new Reading { Id = "flesports-" + c.Pid.ToString("X4"), Name = name, Kind = "keyboard", Source = "flesports" };
+            var c = devs.FirstOrDefault(d => d.Pid == 0x50E4 && d.UsagePage == 0xFF1C && d.Usage == 0x0092 && d.OutLen >= 8); if (c == null) return;
+            var r = new Reading { Id = "flesports-gp108", Name = "FL Esports GP108", Kind = "keyboard", Source = "flesports" };
             using (var h = Open(c.Path))
             {
                 if (!h.IsInvalid)
                 {
                     var a = TelinkKbCmd(h, c, 0x1A);
-                    if (a != null && a[8] <= 100 && (a[8] > 0 || a[9] != 0)) { r.Level = a[8]; r.Charging = a[9] == 1 || a[9] == 2; }
+                    if (a != null && a[3] == 0x1A && a[8] <= 100) { r.Level = a[8]; r.Charging = true; }
                 }
             }
             outp.Add(r);

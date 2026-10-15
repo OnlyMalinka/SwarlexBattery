@@ -2,6 +2,13 @@
 
 All notable changes. Downloads: [Releases](https://github.com/swarlex/SwarlexBattery/releases).
 
+## Unreleased
+### Added
+- **HyperX Cloud II Core Wireless** (03F0:0995 / 069F): the Cloud III Wireless protocol, level and charging.
+- **AJAZZ mice on the 2.4G 8K receiver** (AJ159 APEX, 3151:5007, the AM Infinity 8K receiver): shown as "AJAZZ 8K
+  Mouse", and shown charging while on the cable.
+- **FL Esports GP108** keyboard on its cable (320F:50E4), with the Lofree Hyzen protocol. Not on its 2.4G receiver.
+
 ## 2.0.7
 ### Added
 - **Battery history:** left-click a device in the panel to see its level over the last 24 hours or 7 days, the line
