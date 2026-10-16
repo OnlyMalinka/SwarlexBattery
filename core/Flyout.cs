@@ -139,7 +139,7 @@ namespace SwarlexBattery
             if (Open != null) { lastClosed = Open; lastClosedAt = DateTime.Now; }
             Open = null; win.Hide();
             CloseSide();
-            renaming = null; graphHover = 0; reveal = null; parts.Clear(); closing = null;   // a fade still running ends without effect
+            renaming = null; graphHover = 0; reveal = null; parts.Clear(); closing = null; animUntil = DateTime.MinValue;   // a fade still running ends without effect
             TrimSoon();
         }
 
@@ -253,22 +253,25 @@ namespace SwarlexBattery
         }
 
         // Something a click opened inside the panel or the menu (the history, a device's options, the hidden devices)
-        // fades in and slides down a little, once: the redraws that follow show it as it is. Closing it again
-        // (Collapse) fades it out and slides it up before it is taken away.
+        // fades in, once: the redraws that follow show it as it is. Closing it again (Collapse) fades it out before
+        // it is taken away. The window changes its height at once, so the rows beside the part glide instead (Slide).
         readonly Dictionary<string, UIElement> parts = new Dictionary<string, UIElement>();   // the drawn part for each key
         string closing;                           // the key whose part is fading out
+        DateTime animUntil;                       // a slide runs until then: a refresh waits for it
+        System.Windows.Threading.DispatcherTimer later;
 
         UIElement Reveal(UIElement el, string what)
         {
             parts[what] = el;
-            if (closing == what) { el.Opacity = 0; return el; }   // redrawn by a refresh while it fades out: no flash
+            if (closing == what) { el.Opacity = 0; return el; }   // redrawn while it fades out: no flash
             if (reveal != what) return el;
             reveal = null;
-            if (!Config.Bool("openAnimation", true)) return el;
-            var tt = new TranslateTransform(0, -10); el.RenderTransform = tt;
-            var dur = TimeSpan.FromMilliseconds(260); var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            el.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, dur) { EasingFunction = ease });
-            tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-10, 0, dur) { EasingFunction = ease });
+            var fe = el as FrameworkElement;
+            if (!Config.Bool("openAnimation", true) || fe == null) return el;
+            fe.Opacity = 0;   // until it is laid out and its height is known (Loaded comes before it is drawn)
+            RoutedEventHandler loaded = null;
+            loaded = (s, e) => { fe.Loaded -= loaded; Slide(fe, true, null); };
+            fe.Loaded += loaded;
             return el;
         }
 
@@ -276,14 +279,57 @@ namespace SwarlexBattery
         {
             if (closing == what) return;   // a second click while it fades out
             UIElement el;
-            if (!Config.Bool("openAnimation", true) || !parts.TryGetValue(what, out el) || !el.IsVisible) { done(); return; }
+            var fe = parts.TryGetValue(what, out el) ? el as FrameworkElement : null;
+            if (!Config.Bool("openAnimation", true) || fe == null || !fe.IsVisible) { done(); return; }
             closing = what;
-            var tt = new TranslateTransform(0, 0); el.RenderTransform = tt;
-            var dur = TimeSpan.FromMilliseconds(190); var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
-            var fade = new DoubleAnimation(el.Opacity, 0, dur) { EasingFunction = ease };
-            fade.Completed += (s, e) => { if (closing != what) return; closing = null; done(); };
+            Slide(fe, false, () => { if (closing != what) return; closing = null; done(); });
+        }
+
+        // The part fades in or out while the rows that the window's new height moves glide by its height: those above
+        // it when the window grows upwards (the taskbar below), those below it when it grows downwards. Opening, they
+        // start where they were and glide to their new place; closing, they glide to where they will be once the part
+        // is gone, so nothing jumps when the window shrinks.
+        void Slide(FrameworkElement el, bool open, Action done)
+        {
+            var dur = TimeSpan.FromMilliseconds(open ? 260 : 220);
+            var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+            animUntil = DateTime.Now + dur + TimeSpan.FromMilliseconds(40);
+            var list = el.Parent as Panel;
+            double h = el.ActualHeight + el.Margin.Top + el.Margin.Bottom;
+            // a list taller than the screen scrolls instead of changing the window's height: the part just fades
+            if (list != null && h > 0 && scroll.ScrollableHeight <= 0)
+            {
+                int i = list.Children.IndexOf(el);
+                double shift = above ? h : -h;
+                for (int k = 0; k < list.Children.Count; k++)
+                {
+                    if (k == i || (above ? k > i : k < i)) continue;
+                    var tt = new TranslateTransform(); list.Children[k].RenderTransform = tt;
+                    tt.BeginAnimation(TranslateTransform.YProperty, open ? new DoubleAnimation(shift, 0, dur) { EasingFunction = ease }
+                                                                         : new DoubleAnimation(0, shift, dur) { EasingFunction = ease });
+                }
+            }
+            var fade = new DoubleAnimation(open ? 0 : el.Opacity, open ? 1 : 0, dur) { EasingFunction = ease };
+            if (done != null) fade.Completed += (s, e) => done();
             el.BeginAnimation(UIElement.OpacityProperty, fade);
-            tt.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, -10, dur) { EasingFunction = ease });
+        }
+
+        // a click that opens or closes a part waits until the slide before it has finished: one starting halfway
+        // would make the rows jump, and two parts closing at once would lose one
+        bool Sliding() { return DateTime.Now < animUntil; }
+
+        // a refresh (a poll) that comes while something slides is drawn once it has finished
+        bool Busy()
+        {
+            var wait = animUntil - DateTime.Now;
+            if (wait <= TimeSpan.Zero) return false;
+            if (later == null)
+            {
+                later = new System.Windows.Threading.DispatcherTimer();
+                later.Tick += (s, e) => { later.Stop(); Refresh(); };
+            }
+            later.Stop(); later.Interval = wait; later.Start();
+            return true;
         }
 
         // "Opening animation" (Preferences, on by default): the window's content fades in and slides into place
@@ -426,6 +472,7 @@ namespace SwarlexBattery
 
         public void Refresh()
         {
+            if (Open != null && Busy()) return;
             if (Open == "panel") { RenderPanel(); if (sideOpen) sideScroll.Content = SideContent(); }
             else if (Open == "menu") { scroll.Content = BuildMenu(); if (sideOpen) sideScroll.Content = SideContent(); }
         }
@@ -527,7 +574,9 @@ namespace SwarlexBattery
                     {
                         box.MouseRightButtonUp += (s, e) =>
                         {
-                            e.Handled = true; CloseSide();
+                            e.Handled = true;
+                            if (Sliding()) return;
+                            CloseSide();
                             if (actionsFor == item.Id)
                             {
                                 renaming = null;
@@ -539,7 +588,7 @@ namespace SwarlexBattery
                         };
                         box.MouseLeftButtonUp += (s, e) =>
                         {
-                            if (renaming != null) return;
+                            if (renaming != null || Sliding()) return;
                             e.Handled = true;
                             if (graphFor == item.Id)
                             {
@@ -740,6 +789,7 @@ namespace SwarlexBattery
             {
                 root.Children.Add(MenuRow("ED1A", Strings.T("hiddenDevices", hidden.Count), () =>
                 {
+                    if (Sliding()) return;
                     if (hiddenOpen) Collapse("hidden", () => { if (hiddenOpen) { hiddenOpen = false; Refresh(); } });
                     else { hiddenOpen = true; reveal = "hidden"; Refresh(); }
                 }, false, null, false, hiddenOpen ? "E70E" : "E70D"));
