@@ -137,6 +137,9 @@ namespace SwarlexBattery
 
         // move without resizing, reordering or activating
         public static void MoveTo(IntPtr h, int x, int y) { SetWindowPos(h, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010); }
+        // move and resize in one step (no reordering, no activating, the old picture not copied), so a window that
+        // grows upwards never shows a frame with its new height at its old place
+        public static void MoveSize(IntPtr h, int x, int y, int w, int hgt) { SetWindowPos(h, IntPtr.Zero, x, y, w, hgt, 0x0004 | 0x0010 | 0x0100); }
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
         // Windows 11 look for the flyout: rounded corners, the system border and shadow, dark frame.

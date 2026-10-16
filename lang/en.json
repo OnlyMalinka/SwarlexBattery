@@ -72,6 +72,7 @@
   "statusFileOpt": "Status file for other apps",
   "autoUpdate": "Check for updates automatically",
   "rename": "Rename",
+  "back": "Back",
   "resetName": "Reset name",
   "iconOpt": "Icon: {0}",
   "iconAuto": "automatic",

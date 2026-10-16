@@ -72,6 +72,7 @@
   "statusFileOpt": "Statusdatei für andere Apps",
   "autoUpdate": "Automatisch nach Updates suchen",
   "rename": "Umbenennen",
+  "back": "Zurück",
   "resetName": "Namen zurücksetzen",
   "iconOpt": "Symbol: {0}",
   "iconAuto": "automatisch",
