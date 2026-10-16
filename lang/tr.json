@@ -72,6 +72,7 @@
   "statusFileOpt": "Diğer uygulamalar için durum dosyası",
   "autoUpdate": "Güncellemeleri otomatik denetle",
   "rename": "Yeniden adlandır",
+  "back": "Geri",
   "resetName": "Adı sıfırla",
   "iconOpt": "İkon: {0}",
   "iconAuto": "otomatik",

@@ -35,10 +35,10 @@ namespace SwarlexBattery
         // Preferences: a second window beside the menu that a click does not activate, so the menu stays open
         Window side; IntPtr sideHwnd; ScrollViewer sideScroll; bool sideOpen;
         bool hiddenOpen;                          // the menu's list of hidden devices is expanded
-        string actionsFor, renaming;              // the panel: a device's options shown, its name being edited
+        string renaming;                          // the panel: the device whose name is being edited
         string graphFor; bool graphWeek;          // the panel: a device's battery history shown (a click), over 24 h or 7 days
         long graphHover;                          // the time under the pointer in the graph (0: none); kept when the panel redraws
-        string reveal;                            // what a click just opened ("graph:id", "actions:id", "hidden"): drawn with a fade once
+        string reveal;                            // what a click just opened ("graph:id", "hidden"): drawn with a fade once
 
         static Brush MakeBrush(string c) { var b = (Brush)new BrushConverter().ConvertFromString(c); b.Freeze(); return b; }
 
@@ -139,11 +139,23 @@ namespace SwarlexBattery
             if (Open != null) { lastClosed = Open; lastClosedAt = DateTime.Now; }
             Open = null; win.Hide();
             CloseSide();
-            renaming = null; graphHover = 0; reveal = null; parts.Clear(); closing = null; animUntil = DateTime.MinValue;   // a fade still running ends without effect
+            renaming = null; graphHover = 0; reveal = null; closing = null; animUntil = DateTime.MinValue;   // a fold still running ends without effect
+            if (stopAnim != null) stopAnim();
+            parts.Clear();
             TrimSoon();
         }
 
-        void CloseSide() { sideOpen = false; side.Hide(); }
+        void CloseSide() { sideOpen = false; sideRow = null; side.Hide(); }
+
+        // after a pick in a device's options: the panel takes the focus back first (hiding the active window beside
+        // it would let Windows activate another one and close the panel; renaming needs the keyboard), and its row
+        // loses the highlight at once
+        void LeaveSide()
+        {
+            if (Open == "panel" && hwnd != IntPtr.Zero) { Win.ForceForeground(hwnd); win.Activate(); }
+            CloseSide();
+            if (Open == "panel") RenderPanel(true);
+        }
 
         void CloseUnlessFocused()
         {
@@ -153,8 +165,24 @@ namespace SwarlexBattery
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
-        // the window beside the menu shows Preferences ("prefs") or the languages ("lang"); the same row closes it
+        // the window beside the menu shows Preferences ("prefs") or the languages ("lang"); the same row closes it.
+        // Beside the panel it shows a device's options ("actions", a right click on the device), and from there its
+        // icon ("icon") or low battery level ("low"), level with the device's row.
         string sideKind;
+        int sideTop = int.MinValue;               // the device row's top on the screen (pixels) the options line up with
+        FrameworkElement sideRow;                 // that row as last drawn: measured again whenever the side window is placed
+
+        bool DeviceSide(string id) { return sideOpen && sideItem != null && sideItem.Id == id && (sideKind == "actions" || sideKind == "icon" || sideKind == "low"); }
+
+        // another page of the same window (the options -> the icons and back): the content changes in place
+        void SwitchSide(string kind)
+        {
+            if (!sideOpen) return;
+            sideKind = kind;
+            sideScroll.Content = SideContent();
+            side.UpdateLayout();
+            PlaceSide(Size.Empty);
+        }
 
         void ToggleSide(string kind, PanelItem item = null)
         {
@@ -163,8 +191,9 @@ namespace SwarlexBattery
             // never shows the old size in the new place for a moment
             if (sideOpen) side.Hide();
             bool was = false;
-            sideOpen = true; sideKind = kind; sideItem = item;
-            side.Width = kind == "prefs" ? 330 : 230;
+            sideOpen = true; sideKind = kind; sideItem = item; sideRow = null;   // another device's row until the panel redraws
+            if (item == null) sideTop = int.MinValue;
+            side.Width = kind == "prefs" ? 330 : item != null ? 270 : 230;
             // as tall as the screen allows: a scroll bar only when even that is too short
             var scr = Forms.Screen.FromPoint(anchor);
             var area = Win.AreaOutsideTaskbar(scr.Bounds, scr.WorkingArea);
@@ -184,6 +213,7 @@ namespace SwarlexBattery
             switch (sideKind)
             {
                 case "lang": return BuildLanguages();
+                case "actions": return BuildActions(sideItem);
                 case "icon": return BuildIconPicker(sideItem);
                 case "low": return BuildLowPicker(sideItem);
                 default: return BuildPrefs();
@@ -195,11 +225,13 @@ namespace SwarlexBattery
         {
             var root = new StackPanel();
             if (it == null) return root;
-            root.Children.Add(MenuRow(null, Strings.T("iconAuto"), () => { CloseSide(); host.SetIcon(it.Id, null); }, it.IconChoice == null, null, false, null, true));
+            root.Children.Add(MenuRow("E72B", Strings.T("back"), () => SwitchSide("actions")));
+            root.Children.Add(Separator());
+            root.Children.Add(MenuRow(null, Strings.T("iconAuto"), () => { LeaveSide(); host.SetIcon(it.Id, null); }, it.IconChoice == null, null, false, null, true));
             foreach (var k in BatteryReader.IconChoices)
             {
                 var kind = k;
-                root.Children.Add(MenuRow(BatteryReader.IconFor(kind), KindLabel(kind), () => { CloseSide(); host.SetIcon(it.Id, kind); }, it.IconChoice == kind));
+                root.Children.Add(MenuRow(BatteryReader.IconFor(kind), KindLabel(kind), () => { LeaveSide(); host.SetIcon(it.Id, kind); }, it.IconChoice == kind));
             }
             return root;
         }
@@ -211,11 +243,13 @@ namespace SwarlexBattery
             if (it == null) return root;
             string own; Config.Map("plugins.gadgets.lowLevels").TryGetValue(it.Id, out own);
             int general = (int)Config.Num("plugins.gadgets.lowThreshold", 15);
-            root.Children.Add(MenuRow(null, Strings.T("lowGeneral", Strings.T("percent", general)), () => { CloseSide(); host.SetDeviceLow(it.Id, null); }, own == null));
+            root.Children.Add(MenuRow("E72B", Strings.T("back"), () => SwitchSide("actions")));
+            root.Children.Add(Separator());
+            root.Children.Add(MenuRow(null, Strings.T("lowGeneral", Strings.T("percent", general)), () => { LeaveSide(); host.SetDeviceLow(it.Id, null); }, own == null, null, false, null, true));
             foreach (var p in Host.LowLevels)
             {
                 int pct = p;
-                root.Children.Add(MenuRow(null, Strings.T("percent", pct), () => { CloseSide(); host.SetDeviceLow(it.Id, pct); }, own == pct.ToString()));
+                root.Children.Add(MenuRow(null, Strings.T("percent", pct), () => { LeaveSide(); host.SetDeviceLow(it.Id, pct); }, own == pct.ToString(), null, false, null, true));
             }
             return root;
         }
@@ -253,65 +287,95 @@ namespace SwarlexBattery
         }
 
         // Something a click opened inside the panel or the menu (the history, a device's options, the hidden devices)
-        // fades in, once: the redraws that follow show it as it is. Closing it again (Collapse) fades it out before
-        // it is taken away. The window changes its height at once, so the rows beside the part glide instead (Slide).
-        readonly Dictionary<string, UIElement> parts = new Dictionary<string, UIElement>();   // the drawn part for each key
-        string closing;                           // the key whose part is fading out
-        DateTime animUntil;                       // a slide runs until then: a refresh waits for it
+        // unfolds, once: it sits in a holder whose height grows from nothing while it fades in, and the window grows
+        // with it frame by frame (upwards when the taskbar is below), so nothing jumps. The redraws that follow show it
+        // as it is. Closing it again (Collapse) folds it the same way before it is taken away.
+        readonly Dictionary<string, Border> parts = new Dictionary<string, Border>();   // the holder drawn for each key
+        string closing;                           // the key whose part is folding
+        DateTime animUntil;                       // an unfold runs until then: a refresh waits for it
         System.Windows.Threading.DispatcherTimer later;
+        Action stopAnim;                          // ends a running unfold at once (the window closed)
 
         UIElement Reveal(UIElement el, string what)
         {
-            parts[what] = el;
-            if (closing == what) { el.Opacity = 0; return el; }   // redrawn while it fades out: no flash
-            if (reveal != what) return el;
+            var holder = new Border { Child = el, ClipToBounds = true };
+            parts[what] = holder;
+            if (closing == what) { el.Opacity = 0; return holder; }   // redrawn while it folds: no flash
+            if (reveal != what) return holder;
             reveal = null;
-            var fe = el as FrameworkElement;
-            if (!Config.Bool("openAnimation", true) || fe == null) return el;
-            fe.Opacity = 0;   // until it is laid out and its height is known (Loaded comes before it is drawn)
+            if (!Config.Bool("openAnimation", true)) return holder;
+            holder.Height = 0; el.Opacity = 0;   // the window keeps its height until the unfold starts
             RoutedEventHandler loaded = null;
-            loaded = (s, e) => { fe.Loaded -= loaded; Slide(fe, true, null); };
-            fe.Loaded += loaded;
-            return el;
+            loaded = (s, e) => { holder.Loaded -= loaded; Unfold(holder, true, null); };
+            holder.Loaded += loaded;
+            return holder;
         }
 
         void Collapse(string what, Action done)
         {
-            if (closing == what) return;   // a second click while it fades out
-            UIElement el;
-            var fe = parts.TryGetValue(what, out el) ? el as FrameworkElement : null;
-            if (!Config.Bool("openAnimation", true) || fe == null || !fe.IsVisible) { done(); return; }
+            if (closing == what) return;   // a second click while it folds
+            Border holder;
+            if (!Config.Bool("openAnimation", true) || !parts.TryGetValue(what, out holder) || !holder.IsVisible) { done(); return; }
             closing = what;
-            Slide(fe, false, () => { if (closing != what) return; closing = null; done(); });
+            Unfold(holder, false, () => { if (closing != what) return; closing = null; done(); });
         }
 
-        // The part fades in or out while the rows that the window's new height moves glide by its height: those above
-        // it when the window grows upwards (the taskbar below), those below it when it grows downwards. Opening, they
-        // start where they were and glide to their new place; closing, they glide to where they will be once the part
-        // is gone, so nothing jumps when the window shrinks.
-        void Slide(FrameworkElement el, bool open, Action done)
+        // Each frame: the holder's height and the part's opacity follow the eased time, and the window takes the
+        // height its content now asks for (a list taller than the screen stops at its scroll height) in one move-and-
+        // resize, its bottom (taskbar below) or top (taskbar above) staying where it is.
+        void Unfold(Border holder, bool open, Action done)
         {
-            var dur = TimeSpan.FromMilliseconds(open ? 260 : 220);
-            var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
-            animUntil = DateTime.Now + dur + TimeSpan.FromMilliseconds(40);
-            var list = el.Parent as Panel;
-            double h = el.ActualHeight + el.Margin.Top + el.Margin.Bottom;
-            // a list taller than the screen scrolls instead of changing the window's height: the part just fades
-            if (list != null && h > 0 && scroll.ScrollableHeight <= 0)
+            var el = holder.Child as FrameworkElement;
+            var content = win.Content as FrameworkElement;
+            var src = PresentationSource.FromVisual(win);
+            if (stopAnim != null) stopAnim();
+            if (el == null || content == null || hwnd == IntPtr.Zero || src == null || src.CompositionTarget == null || holder.ActualWidth <= 0)
             {
-                int i = list.Children.IndexOf(el);
-                double shift = above ? h : -h;
-                for (int k = 0; k < list.Children.Count; k++)
-                {
-                    if (k == i || (above ? k > i : k < i)) continue;
-                    var tt = new TranslateTransform(); list.Children[k].RenderTransform = tt;
-                    tt.BeginAnimation(TranslateTransform.YProperty, open ? new DoubleAnimation(shift, 0, dur) { EasingFunction = ease }
-                                                                         : new DoubleAnimation(0, shift, dur) { EasingFunction = ease });
-                }
+                holder.ClearValue(FrameworkElement.HeightProperty); if (el != null) el.Opacity = 1;
+                if (done != null) done();
+                return;
             }
-            var fade = new DoubleAnimation(open ? 0 : el.Opacity, open ? 1 : 0, dur) { EasingFunction = ease };
-            if (done != null) fade.Completed += (s, e) => done();
-            el.BeginAnimation(UIElement.OpacityProperty, fade);
+            el.Measure(new Size(holder.ActualWidth, double.PositiveInfinity));
+            double h = open ? el.DesiredSize.Height : holder.ActualHeight;
+            double sy = src.CompositionTarget.TransformToDevice.M22;
+            var r = Win.WindowRect(hwnd);
+            double startContent = content.ActualHeight;
+            double dur = open ? 260 : 220;
+            animUntil = DateTime.Now + TimeSpan.FromMilliseconds(dur + 40);
+            var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            win.SizeToContent = SizeToContent.Manual;   // the window's height is set here until the end
+            // a frame where the window is a pixel shorter than its content must not flash a scroll bar
+            // (one that is already showing - a list taller than the screen - stays, so the rows keep their width)
+            if (scroll.ComputedVerticalScrollBarVisibility != Visibility.Visible) scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+            EventHandler tick = null;
+            Action finish = null;
+            finish = () =>
+            {
+                CompositionTarget.Rendering -= tick; stopAnim = null;
+                scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+                if (open) holder.ClearValue(FrameworkElement.HeightProperty);
+                el.Opacity = open ? 1 : 0;
+                win.SizeToContent = SizeToContent.Height;
+                if (done != null) done();
+            };
+            tick = (s, e) =>
+            {
+                double t = 1;
+                try
+                {
+                    t = Math.Min(1, clock.Elapsed.TotalMilliseconds / dur);
+                    double p = ease.Ease(open ? t : 1 - t);
+                    holder.Height = h * p; el.Opacity = p;
+                    content.Measure(new Size(content.ActualWidth, double.PositiveInfinity));
+                    int hp = Math.Max(1, r.Height + (int)Math.Ceiling((content.DesiredSize.Height - startContent) * sy - 0.01));
+                    Win.MoveSize(hwnd, r.Left, above ? r.Bottom - hp : r.Top, r.Width, hp);
+                }
+                catch (Exception ex) { Log.Write("unfold: " + ex.Message); t = 1; }   // ends at once instead of failing every frame
+                if (t >= 1) finish();
+            };
+            stopAnim = finish;
+            CompositionTarget.Rendering += tick;
         }
 
         // a click that opens or closes a part waits until the slide before it has finished: one starting halfway
@@ -366,6 +430,13 @@ namespace SwarlexBattery
             int x = r.Right + gap;
             if (x + w > wa.Right - m) x = Math.Max(wa.Left + m, r.Left - w - gap);
             int y = above ? r.Bottom - h : r.Top;
+            // a device's options: their first row level with the device's row (the window's padding above it)
+            if (sideItem != null && sideRow != null && sideRow.IsVisible)
+            {
+                // the panel may have moved or changed height since the right click (a poll, a device more or less)
+                try { sideTop = (int)Math.Round(sideRow.PointToScreen(new Point(0, 0)).Y); } catch (InvalidOperationException) { }
+            }
+            if (sideItem != null && sideTop != int.MinValue) y = sideTop - m;
             y = Math.Max(wa.Top + m, Math.Min(wa.Bottom - h - m, y));
             Win.MoveTo(sideHwnd, x, y);
         }
@@ -392,7 +463,7 @@ namespace SwarlexBattery
             Open = "panel";
             ApplyTheme();
             CloseSide();   // Preferences belong to the menu
-            actionsFor = null; renaming = null;
+            renaming = null;
             RenderPanel();
             Show(Config.Num("panel.width", 320));
             host.PollSoon();   // fresh data while open
@@ -403,6 +474,7 @@ namespace SwarlexBattery
             if (Open == "menu") { Close(); return; }
             if (JustClosed("menu")) return;
             Open = "menu";
+            CloseSide();   // a device's options belong to the panel
             ApplyTheme(); hiddenOpen = false;
             scroll.Content = BuildMenu();
             Show(270);
@@ -411,6 +483,7 @@ namespace SwarlexBattery
         // opens next to the tray icon that was clicked (the cursor), above or below the taskbar
         void Show(double width)
         {
+            if (stopAnim != null) stopAnim();   // an unfold of the menu would keep its width on the panel
             win.Width = width;
             anchor = Forms.Cursor.Position;
             if (!win.IsVisible) { win.Left = -20000; win.Top = -20000; win.Show(); }
@@ -473,6 +546,12 @@ namespace SwarlexBattery
         public void Refresh()
         {
             if (Open != null && Busy()) return;
+            // a device's options follow its new state (a new name or icon); a device that went away closes them
+            if (sideOpen && sideItem != null)
+            {
+                var now = host.Current != null ? host.Current.Items.FirstOrDefault(x => x.Id == sideItem.Id) : null;
+                if (now == null) CloseSide(); else sideItem = now;
+            }
             if (Open == "panel") { RenderPanel(); if (sideOpen) sideScroll.Content = SideContent(); }
             else if (Open == "menu") { scroll.Content = BuildMenu(); if (sideOpen) sideScroll.Content = SideContent(); }
         }
@@ -524,6 +603,7 @@ namespace SwarlexBattery
         {
             if (renaming != null && !force) return;
             var snap = host.Current;
+            sideRow = null;
             var root = new StackPanel();
             var title = Text(snap != null ? snap.Title : Strings.T("title"), fg, 15, true); title.Margin = new Thickness(0, 0, 0, 6); root.Children.Add(title);
             TextBox editor = null;
@@ -576,20 +656,20 @@ namespace SwarlexBattery
                         {
                             e.Handled = true;
                             if (Sliding()) return;
-                            CloseSide();
-                            if (actionsFor == item.Id)
-                            {
-                                renaming = null;
-                                Collapse("actions:" + item.Id, () => { if (actionsFor == item.Id) { actionsFor = null; if (Open == "panel") RenderPanel(true); } });
-                                return;
-                            }
-                            actionsFor = item.Id; renaming = null; reveal = "actions:" + item.Id;
-                            RenderPanel(true);
+                            renaming = null;
+                            // the same device again: its options close
+                            if (DeviceSide(item.Id)) { CloseSide(); RenderPanel(true); return; }
+                            var row = (FrameworkElement)s;
+                            var at = row.PointToScreen(new Point(0, 0));
+                            sideTop = (int)Math.Round(at.Y);
+                            ToggleSide("actions", item);
                         };
                         box.MouseLeftButtonUp += (s, e) =>
                         {
                             if (renaming != null || Sliding()) return;
                             e.Handled = true;
+                            // the history moves the rows: options open beside one would no longer line up with it
+                            if (sideOpen && sideItem != null) CloseSide();
                             if (graphFor == item.Id)
                             {
                                 Collapse("graph:" + item.Id, () => { if (graphFor == item.Id) { graphFor = null; graphHover = 0; if (Open == "panel") RenderPanel(true); } });
@@ -602,18 +682,26 @@ namespace SwarlexBattery
                         box.Cursor = Cursors.Hand;
                     }
                     // the row lights up under the pointer like the menu's rows, so it reads as something to click
-                    root.Children.Add(it.Id == null ? (UIElement)box : new Border { Child = box, Style = rowStyle, CornerRadius = new CornerRadius(6),
-                                                                                    Margin = new Thickness(-6, 0, -6, 0), Padding = new Thickness(6, 0, 6, 0) });
+                    // (highlighted while its options are open beside the panel)
+                    if (it.Id == null) root.Children.Add(box);
+                    else
+                    {
+                        var rowBorder = new Border { Child = box, Style = DeviceSide(it.Id) ? rowStyleMarked : rowStyle, CornerRadius = new CornerRadius(6),
+                                                     Margin = new Thickness(-6, 0, -6, 0), Padding = new Thickness(6, 0, 6, 0) };
+                        if (DeviceSide(it.Id)) sideRow = box;   // the options beside the panel follow this row
+                        root.Children.Add(rowBorder);
+                    }
                     if (graphFor != null && graphFor == it.Id) root.Children.Add(Reveal(Graph(it), "graph:" + it.Id));
-                    if (actionsFor != null && actionsFor == it.Id) { DeviceActions(root, it); Reveal(root.Children[root.Children.Count - 1], "actions:" + it.Id); }
                 }
-                // a device that went away while its options were open no longer hides the hint
-                if (snap.Items.Count > 0 && (actionsFor == null || !snap.Items.Any(x => x.Id == actionsFor)))
+                if (snap.Items.Count > 0)
                 {
                     var hint = Text(Strings.T("deviceHint"), muted, 11); hint.Margin = new Thickness(0, 4, 0, 0); root.Children.Add(hint);
                 }
             }
             scroll.Content = root;
+            // once laid out, the options beside the panel line up with the device's row again
+            if (sideOpen && sideItem != null)
+                win.Dispatcher.BeginInvoke(new Action(() => { if (sideOpen && sideItem != null) PlaceSide(Size.Empty); }), System.Windows.Threading.DispatcherPriority.Background);
             if (editor != null)
             {
                 var ed = editor;
@@ -642,7 +730,7 @@ namespace SwarlexBattery
                 bool w = week;
                 var t = Text(Strings.T(w ? "hist7d" : "hist24h"), graphWeek == w ? fg : muted, 11);
                 t.FontWeight = graphWeek == w ? FontWeights.SemiBold : FontWeights.Normal; t.Margin = new Thickness(10, 0, 0, 0); t.Cursor = Cursors.Hand;
-                t.MouseLeftButtonUp += (s, e) => { graphWeek = w; graphHover = 0; RenderPanel(true); e.Handled = true; };
+                t.MouseLeftButtonUp += (s, e) => { e.Handled = true; if (Sliding()) return; graphWeek = w; graphHover = 0; RenderPanel(true); };
                 DockPanel.SetDock(t, Dock.Right); head.Children.Add(t);
             }
             var hoverText = Text("", fg, 11); hoverText.TextWrapping = TextWrapping.NoWrap; DockPanel.SetDock(hoverText, Dock.Left); head.Children.Add(hoverText);
@@ -724,25 +812,26 @@ namespace SwarlexBattery
             return box;
         }
 
-        // a device's options, below it in the panel
-        void DeviceActions(StackPanel root, PanelItem it)
+        // a device's options, in the window beside the panel (a right click on the device); renaming happens in the
+        // panel itself, in the device's row
+        StackPanel BuildActions(PanelItem it)
         {
-            var box = new StackPanel { Margin = new Thickness(14, 0, 0, 6) };
-            box.Children.Add(MenuRow("E8AC", Strings.T("rename"), () => { CloseSide(); renaming = it.Id; RenderPanel(true); }));
+            var box = new StackPanel();
+            if (it == null) return box;
+            box.Children.Add(MenuRow("E8AC", Strings.T("rename"), () => { if (Sliding()) return; LeaveSide(); renaming = it.Id; RenderPanel(true); }));
             if (it.OwnName != null && it.OwnName != it.Label)
-                box.Children.Add(MenuRow("E7A7", Strings.T("resetName"), () => host.Rename(it.Id, null)));
-            // the icon and the low battery level are picked in the window beside the panel, so the panel stays short
+                box.Children.Add(MenuRow("E7A7", Strings.T("resetName"), () => { LeaveSide(); host.Rename(it.Id, null); }));
             box.Children.Add(MenuRow("E790", Strings.T("iconOpt", it.IconChoice == null ? Strings.T("iconAuto") : KindLabel(it.IconChoice)),
-                                     () => ToggleSide("icon", it), false, null, sideOpen && sideKind == "icon", "E76C"));
+                                     () => SwitchSide("icon"), false, null, false, "E76C"));
             if (it.Pct >= 0)
             {
                 string own; Config.Map("plugins.gadgets.lowLevels").TryGetValue(it.Id, out own);
                 int general = (int)Config.Num("plugins.gadgets.lowThreshold", 15);
                 string cur = own != null ? Strings.T("percent", own) : Strings.T("lowGeneral", Strings.T("percent", general));
-                box.Children.Add(MenuRow("EBA0", Strings.T("deviceLow", cur), () => ToggleSide("low", it), false, null, sideOpen && sideKind == "low", "E76C"));
+                box.Children.Add(MenuRow("EBA0", Strings.T("deviceLow", cur), () => SwitchSide("low"), false, null, false, "E76C"));
             }
-            box.Children.Add(MenuRow("ED1A", Strings.T("hide"), () => { CloseSide(); actionsFor = null; host.Hide(it.Id, it.OwnName ?? it.Label); }));
-            root.Children.Add(box);
+            box.Children.Add(MenuRow("ED1A", Strings.T("hide"), () => { LeaveSide(); host.Hide(it.Id, it.OwnName ?? it.Label); }));
+            return box;
         }
 
         // The icon column (26 px) is there when the row has an icon, or "indent" keeps it empty: rows without icons line

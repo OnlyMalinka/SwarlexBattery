@@ -2,6 +2,17 @@
 
 All notable changes. Downloads: [Releases](https://github.com/swarlex/SwarlexBattery/releases).
 
+## 2.0.10
+### Changed
+- A device's options (right-click it in the panel) open in a small window beside the panel, level with the device,
+  instead of below it, so the panel keeps its size. The icon and low battery pages open in the same window, with a
+  Back row; right-clicking the device again closes it.
+
+### Fixed
+- Opening the battery history or a device's options no longer flashes an empty strip at the top of the panel: the
+  part unfolds and the panel grows with it frame by frame (its bottom staying on the taskbar), and folds back the
+  same way when it closes. No scroll bar flashes at its side while it does.
+
 ## 2.0.9
 ### Fixed
 - The open and close animations of the battery history, a device's options and the hidden devices are in step: the
