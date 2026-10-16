@@ -2,6 +2,16 @@
 
 All notable changes. Downloads: [Releases](https://github.com/swarlex/SwarlexBattery/releases).
 
+## 2.0.8
+### Changed
+- The battery history, a device's options (right-click) and the menu's hidden devices now slide open and closed with
+  a short fade instead of appearing at once (off with "Opening animation" in Preferences).
+
+### Fixed
+- Opening another device's history no longer shows the time and level the pointer last read in the previous one.
+- The "left-click for history" hint came back only after the panel closed when a device went away while its options
+  were open.
+
 ## 2.0.7
 ### Added
 - **Battery history:** left-click a device in the panel to see its level over the last 24 hours or 7 days, the line
