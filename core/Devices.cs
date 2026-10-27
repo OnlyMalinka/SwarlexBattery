@@ -705,9 +705,18 @@ namespace SwarlexBattery
         // ---------------------------------------------------------------- AM Infinity 8K mouse (3151:5007)
         // Aiacos/ajazz-control-center: on FFFF:0002, feature report 0 "00 f7" (the vendor's status poll), then feature
         // report 05: 05 00 00 <charge>. A non-zero byte before the charge is reconnect junk; 0 = link not up yet.
+        // AJAZZ AJ159 APEX on its cable without the receiver (3151:4026): the mouse gives no level there (F7 and the
+        // vendor's 83 GET_BATTERY both answer with zeros; ajazz-control-center: the vendor driver shows battery 0 for
+        // wired mice), so nothing is asked - it is shown charging with the last level, as the AULA F75 on its cable.
         static void ReadAmInfinity(List<HidInfo> devs, List<Reading> outp)
         {
-            var c = devs.FirstOrDefault(d => d.Pid == 0x5007 && d.UsagePage == 0xFFFF && d.Usage == 0x0002 && d.FeatLen >= 4); if (c == null) return;
+            var c = devs.FirstOrDefault(d => d.Pid == 0x5007 && d.UsagePage == 0xFFFF && d.Usage == 0x0002 && d.FeatLen >= 4);
+            if (c == null)
+            {
+                if (devs.Any(d => d.Pid == 0x4026))
+                    outp.Add(new Reading { Id = "aminfinity-mouse", Name = "AJAZZ 8K Mouse", Kind = "mouse", Source = "aminfinity", Charging = true });
+                return;
+            }
             // the same receiver ships with AJAZZ mice (AJ159 APEX etc.), which name it "AJAZZ 2.4G 8K"
             bool ajazz = devs.Any(d => (d.Product ?? "").IndexOf("AJAZZ", StringComparison.OrdinalIgnoreCase) >= 0);
             var r = new Reading { Id = "aminfinity-mouse", Name = ajazz ? "AJAZZ 8K Mouse" : "AM Infinity 8K Mouse", Kind = "mouse", Source = "aminfinity", Receiver = true };

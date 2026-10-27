@@ -6,7 +6,12 @@ All notable changes. Downloads: [Releases](https://github.com/swarlex/SwarlexBat
 ### Added
 - **HyperX Cloud II Core Wireless** (03F0:0995 / 069F): the Cloud III Wireless protocol, level and charging.
 - **AJAZZ mice on the 2.4G 8K receiver** (AJ159 APEX, 3151:5007, the AM Infinity 8K receiver): shown as "AJAZZ 8K
-  Mouse", and shown charging while on the cable.
+  Mouse", and shown charging while on the cable. On its cable without the receiver (3151:4026) the mouse gives no
+  level: it is shown charging with its last level.
+
+### Changed
+- A device that charges on its cable without giving a level, with no reading in the last week, is listed with that
+  reason ("charging on its cable; the level shows again on its receiver") instead of being left out.
 
 ## 2.0.10
 ### Changed
